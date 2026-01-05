@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -47,7 +48,14 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	defer file.Close()
 
-	mediaType := header.Header.Get("Content-Type")
+	// Get the media type
+	mediaType, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't parse media type", err)
+		return
+	}
+
+	// Read the file data
 	fileData := make([]byte, header.Size)
 	_, err = file.Read(fileData)
 	if err != nil {
