@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"mime"
 	"net/http"
@@ -80,14 +82,17 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusBadRequest, "Unsupported media type", nil)
 		return
 	}
-	err = saveFileLocally(cfg.assetsRoot, fmt.Sprintf("%s.%s", videoID, fileExt), fileData)
+	key := make([]byte, 32)
+	rand.Read(key)
+	filename := fmt.Sprintf("%s.%s", base64.RawURLEncoding.EncodeToString(key), fileExt)
+	err = saveFileLocally(cfg.assetsRoot, filename, fileData)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't save thumbnail file", err)
 		return
 	}
 
 	// Update video thumbnail URL pointing to local assets
-	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, videoID, fileExt)
+	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, filename)
 	dbVideo.ThumbnailURL = &thumbnailURL
 	err = cfg.db.UpdateVideo(dbVideo)
 	if err != nil {
