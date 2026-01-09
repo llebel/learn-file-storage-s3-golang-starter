@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 
 	"github.com/joho/godotenv"
@@ -17,10 +20,11 @@ type apiConfig struct {
 	platform         string
 	filepathRoot     string
 	assetsRoot       string
+	port             string
 	s3Bucket         string
 	s3Region         string
 	s3CfDistribution string
-	port             string
+	s3Client         *s3.Client
 }
 
 func main() {
@@ -51,10 +55,17 @@ func main() {
 		log.Fatal("FILEPATH_ROOT environment variable is not set")
 	}
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		log.Fatal("PORT environment variable is not set")
+	}
+
 	assetsRoot := os.Getenv("ASSETS_ROOT")
 	if assetsRoot == "" {
 		log.Fatal("ASSETS_ROOT environment variable is not set")
 	}
+
+	// S3 Configuration
 
 	s3Bucket := os.Getenv("S3_BUCKET")
 	if s3Bucket == "" {
@@ -71,10 +82,11 @@ func main() {
 		log.Fatal("S3_CF_DISTRO environment variable is not set")
 	}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		log.Fatal("PORT environment variable is not set")
+	s3Config, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(s3Region))
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
 	}
+	s3Client := s3.NewFromConfig(s3Config)
 
 	cfg := apiConfig{
 		db:               db,
@@ -82,10 +94,11 @@ func main() {
 		platform:         platform,
 		filepathRoot:     filepathRoot,
 		assetsRoot:       assetsRoot,
+		port:             port,
 		s3Bucket:         s3Bucket,
 		s3Region:         s3Region,
 		s3CfDistribution: s3CfDistribution,
-		port:             port,
+		s3Client:         s3Client,
 	}
 
 	err = cfg.ensureAssetsDir()
