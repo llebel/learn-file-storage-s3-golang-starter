@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -93,10 +96,27 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Determine video aspect ratio using ffprobe
+	aspectRatio, err := getVideoAspectRatio(tmpFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get video aspect ratio", err)
+		return
+	}
+
 	// Put the object into S3 using PutObject.
 	key := make([]byte, 32)
 	rand.Read(key)
-	objName := fmt.Sprintf("%s.%s", base64.RawURLEncoding.EncodeToString(key), fileExt)
+	var objName string
+	switch aspectRatio {
+	case "16:9":
+		objName = fmt.Sprintf("landscape/%s.%s", base64.RawURLEncoding.EncodeToString(key), fileExt)
+	case "9:16":
+		objName = fmt.Sprintf("portrait/%s.%s", base64.RawURLEncoding.EncodeToString(key), fileExt)
+	default:
+		objName = fmt.Sprintf("other/%s.%s", base64.RawURLEncoding.EncodeToString(key), fileExt)
+	}
+
+	// Use the S3 client to upload the file
 	fmt.Printf("Uploading video to S3 bucket %s with key %s\n", cfg.s3Bucket, objName)
 	_, err = cfg.s3Client.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
@@ -119,4 +139,43 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 
 	respondWithJSON(w, http.StatusOK, dbVideo)
+}
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	// Use ffprobe to get video dimensions
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+	var b bytes.Buffer
+	cmd.Stdout = &b
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+
+	// Parse the JSON output to extract width and height
+	type VideoFormat struct {
+		Streams []struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"streams"`
+	}
+	videoFormat := &VideoFormat{}
+	err = json.Unmarshal(b.Bytes(), videoFormat)
+	if err != nil {
+		return "", err
+	}
+	if len(videoFormat.Streams) == 0 {
+		return "", fmt.Errorf("no video streams found")
+	}
+	width := videoFormat.Streams[0].Width
+	height := videoFormat.Streams[0].Height
+
+	// Calculate aspect ratio
+	aspectRatio := float32(width) / float32(height)
+	if 1.77 < aspectRatio && aspectRatio < 1.78 {
+		return "16:9", nil
+	} else if 0.56 < aspectRatio && aspectRatio < 0.57 {
+		return "9:16", nil
+	} else {
+		return "other", nil
+	}
 }
