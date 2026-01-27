@@ -12,12 +12,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
-	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
 )
 
@@ -148,8 +145,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Update the handlerUploadVideo handler code to store bucket and key as a comma delimited string in the video_url. E.g. tube-private-12345,portrait/vertical.mp4
-	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, objName)
+	// Store an actual URL again in the video_url column, but this time, use the cloudfront URL. Use your distribution's domain name (including the https:// protocol)
+	videoURL := fmt.Sprintf("https://%s/%s", cfg.s3CfDistribution, objName)
 	dbVideo.VideoURL = &videoURL
 	err = cfg.db.UpdateVideo(dbVideo)
 	if err != nil {
@@ -157,13 +154,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Create signedURL for video object
-	signedVideo, err := cfg.dbVideoToSignedVideo(dbVideo)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't generate signed URL", err)
-		return
-	}
-	respondWithJSON(w, http.StatusOK, signedVideo)
+	respondWithJSON(w, http.StatusOK, dbVideo)
 }
 
 func getVideoAspectRatio(filePath string) (string, error) {
@@ -214,33 +205,4 @@ func processVideoForFastStart(filePath string) (string, error) {
 		return "", err
 	}
 	return outputFilepath, nil
-}
-
-// Create a presigned URL for the given S3 object
-func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
-	s3PresignClient := s3.NewPresignClient(s3Client)
-	req, _ := s3PresignClient.PresignGetObject(context.Background(), &s3.GetObjectInput{
-		Bucket: &bucket,
-		Key:    &key,
-	}, s3.WithPresignExpires(expireTime))
-
-	return req.URL, nil
-}
-
-// Decode our bucket,key from VideoURL field and return video object with the signed URL
-func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
-	if video.VideoURL == nil {
-		return video, nil
-	}
-	bk := strings.Split(*video.VideoURL, ",")
-	if len(bk) != 2 {
-		fmt.Printf("DEBUG Unexpected VideoURL format encoding: VideoURL=%s\n", *video.VideoURL)
-		return video, nil
-	}
-	signedURL, err := generatePresignedURL(cfg.s3Client, bk[0], bk[1], 24*time.Hour)
-	if err != nil {
-		return video, err
-	}
-	video.VideoURL = &signedURL
-	return video, nil
 }
